@@ -15,6 +15,7 @@ from util import AverageMeter
 from util import adjust_learning_rate, warmup_learning_rate, accuracy
 from util import set_optimizer, save_model
 from networks.resnet_big import SupCEResNet
+from data.imagenet import ImageNet
 
 try:
     import apex
@@ -63,6 +64,15 @@ def parse_option():
                         help='warm-up for large batch training')
     parser.add_argument('--trial', type=str, default='0',
                         help='id for recording multiple runs')
+    
+    parser.add_argument('--world_size', default=-1, type=int,
+                    help='number of nodes for distributed training')
+    
+    parser.add_argument('--multiprocessing-distributed', action='store_true',
+                    help='Use multi-processing distributed training to launch '
+                         'N processes per node, which has N GPUs. This is the '
+                         'fastest way to use PyTorch for either single node or '
+                         'multi node data parallel training')
 
     opt = parser.parse_args()
 
@@ -112,6 +122,11 @@ def parse_option():
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
 
+    if opt.dist_url == "env://" and opt.world_size == -1:
+        opt.world_size = int(os.environ["WORLD_SIZE"])
+
+    opt.distributed = opt.world_size > 1 or opt.multiprocessing_distributed
+
     return opt
 
 
@@ -123,6 +138,9 @@ def set_loader(opt):
     elif opt.dataset == 'cifar100':
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
+    elif opt.dataset == 'imagenet':
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225)
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
     normalize = transforms.Normalize(mean=mean, std=std)
@@ -153,10 +171,20 @@ def set_loader(opt):
         val_dataset = datasets.CIFAR100(root=opt.data_folder,
                                         train=False,
                                         transform=val_transform)
+    elif opt.dataset == 'imagenet':
+        train_dataset = ImageNet(root=opt.data_folder, split='train',
+                                          transform=train_transform)
+        val_dataset = ImageNet(root=opt.data_folder, split='val',
+                                    transform=val_transform)
+
     else:
         raise ValueError(opt.dataset)
 
-    train_sampler = None
+    if opt.distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    else:
+        train_sampler = None
+
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=opt.batch_size, shuffle=(train_sampler is None),
         num_workers=opt.num_workers, pin_memory=True, sampler=train_sampler)

@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import os
 import sys
 import argparse
 import time
@@ -61,6 +62,15 @@ def parse_option():
     parser.add_argument('--ckpt', type=str, default='',
                         help='path to pre-trained model')
 
+    parser.add_argument('--world_size', default=-1, type=int,
+                    help='number of nodes for distributed training')
+    
+    parser.add_argument('--multiprocessing-distributed', action='store_true',
+                    help='Use multi-processing distributed training to launch '
+                         'N processes per node, which has N GPUs. This is the '
+                         'fastest way to use PyTorch for either single node or '
+                         'multi node data parallel training')
+
     opt = parser.parse_args()
 
     # set the path according to the environment
@@ -96,6 +106,11 @@ def parse_option():
         opt.n_cls = 100
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
+    
+    if opt.dist_url == "env://" and opt.world_size == -1:
+        opt.world_size = int(os.environ["WORLD_SIZE"])
+
+    opt.distributed = opt.world_size > 1 or opt.multiprocessing_distributed
 
     return opt
 
